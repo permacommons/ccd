@@ -1,4 +1,4 @@
-# cdd - Change Directory Directory
+# ccd - Change Change Directory
 
 A fast directory navigation tool that uses the `locate` database to quickly find and change to directories.
 
@@ -20,7 +20,7 @@ A fast directory navigation tool that uses the `locate` database to quickly find
 2. Source the shell wrapper in your shell profile:
    ```bash
    # Add this to your ~/.bashrc or ~/.zshrc
-   source /path/to/cdd/cdd.sh
+   source /path/to/ccd/ccd.sh
    ```
 
 3. Make sure your locate database is up to date:
@@ -31,24 +31,16 @@ A fast directory navigation tool that uses the `locate` database to quickly find
 ## Usage
 
 ```bash
-# Show help
-cdd
-cdd --help
-cdd -h
+# change into best match for "proj" (case-sensitive)
+ccd Proj
 
-# Search for directories containing "proj"
-cdd proj
-
-# Search for directories containing "docs"
-cdd docs
-
-# Search for directories containing "tmp"
-cdd tmp
+# Invoke interactive mode
+ccd
 ```
 
 ## How it works
 
-1. The `cdd` command searches the locate database using `locate -i --limit 100 <pattern>`
+1. The `ccd` command searches the locate database using `locate -i --limit 100 <pattern>`
 2. Filters results to show only directories
 3. Changes to the first directory found
 4. Provides feedback about the number of directories found and which one was selected
@@ -62,12 +54,12 @@ cdd tmp
 ## Examples
 
 ```bash
-$ cdd tmp
+$ ccd tmp
 Searching for directories matching: tmp
 Found 19 directories in first 100 results, selected: /tmp
 Changed to: /tmp
 
-$ cdd nonexistent
+$ ccd nonexistent
 Searching for directories matching: nonexistent
 No files or directories found matching 'nonexistent'
 ```

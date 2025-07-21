@@ -24,7 +24,7 @@ use ratatui::{
 // Constants
 const LOCATE_LIMIT: &str = "100";
 const PAGE_SIZE: usize = 10;
-const FREQUENCY_FILE_NAME: &str = ".cdd_frequency";
+const FREQUENCY_FILE_NAME: &str = ".ccd_frequency";
 
 // Custom error types
 #[derive(Debug)]
@@ -540,24 +540,25 @@ fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
 }
 
 fn print_help() {
-    println!("cdd - Change Directory Directory");
+    println!("ccd-pick - ChangeChange Directory");
     println!();
     println!("USAGE:");
-    println!("    cdd                    Enter interactive mode");
-    println!("    cdd <search_pattern>   Search for directories matching pattern");
+    println!("    ccd-pick -i                   Enter interactive mode");
+    println!("    ccd-pick <search_pattern>     Search for directories matching pattern");
     println!();
     println!("DESCRIPTION:");
     println!("    Uses the locate database to quickly look up directories to cd into.");
     println!("    Remembers most frequently used directories for faster access.");
+    println!("    Usually invoked via the ccd wrapper function.");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help    Show this help message");
     println!("    -i            Interactive mode (used internally by shell wrapper)");
     println!();
     println!("EXAMPLES:");
-    println!("    cdd           # Enter interactive mode");
-    println!("    cdd proj      # Find directories containing 'proj'");
-    println!("    cdd docs      # Find directories containing 'docs'");
+    println!("    ccd-pick -i      # Enter interactive mode");
+    println!("    ccd-pick proj    # Find directories containing 'proj'");
+    println!("    ccd-pick Docs    # Find directories containing 'Docs'");
     println!();
     println!("INTERACTIVE MODE:");
     println!("    Type to search, use ↑/↓ to navigate, PgUp/PgDn for fast navigation");
