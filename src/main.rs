@@ -1,10 +1,12 @@
 use std::env;
 use std::process::{Command, exit};
-use std::path::Path;
-use std::io;
+use std::path::{Path, PathBuf};
+use std::io::{self, BufRead, BufReader, Write};
 use std::fs;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::error::Error;
+use std::fmt;
+
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -19,134 +21,50 @@ use ratatui::{
     Frame, Terminal,
 };
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    
-    // Check for interactive mode flag
-    if args.len() > 1 && args[1] == "-i" {
-        if let Err(e) = run_interactive_mode() {
-            eprintln!("Error in interactive mode: {}", e);
-            exit(1);
+// Constants
+const LOCATE_LIMIT: &str = "100";
+const PAGE_SIZE: usize = 10;
+const FREQUENCY_FILE_NAME: &str = ".cdd_frequency";
+
+// Custom error types
+#[derive(Debug)]
+enum CddError {
+    LocateCommand(String),
+    NoDirectoriesFound,
+    DirectoryNotFound(String),
+    IoError(io::Error),
+}
+
+impl fmt::Display for CddError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CddError::LocateCommand(msg) => write!(f, "Locate command error: {}", msg),
+            CddError::NoDirectoriesFound => write!(f, "No directories found"),
+            CddError::DirectoryNotFound(path) => write!(f, "Directory not found: {}", path),
+            CddError::IoError(err) => write!(f, "IO error: {}", err),
         }
-        return;
-    }
-    
-    // Check for increment frequency flag
-    if args.len() > 2 && args[1] == "--increment" {
-        let path = &args[2];
-        increment_frequency(path);
-        return;
-    }
-    
-    // If no arguments provided or help requested, show help
-    if args.len() == 1 || (args.len() > 1 && (args[1] == "--help" || args[1] == "-h")) {
-        print_help();
-        return;
-    }
-    
-    // If search pattern provided
-    if args.len() > 1 {
-        let search_pattern = &args[1];
-        search_and_change_directory(search_pattern);
-        return;
     }
 }
 
-fn search_and_change_directory(search_pattern: &str) {
-    eprintln!("Searching for directories matching: {}", search_pattern);
-    
-    // Run locate with limit
-    let output = match Command::new("locate")
-        .arg("--limit")
-        .arg("100")
-        .arg(search_pattern)
-        .output()
-    {
-        Ok(output) => output,
-        Err(e) => {
-            eprintln!("Error running locate command: {}", e);
-            eprintln!("Make sure 'locate' is installed and the database is updated (run 'sudo updatedb')");
-            exit(1);
-        }
-    };
-    
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let paths: Vec<&str> = stdout.lines().collect();
-    
-    // locate returns exit status 1 when no matches are found, which is normal
-    if !output.status.success() && !paths.is_empty() {
-        eprintln!("locate command failed with status: {}", output.status);
-        exit(1);
+impl Error for CddError {}
+
+impl From<io::Error> for CddError {
+    fn from(err: io::Error) -> Self {
+        CddError::IoError(err)
     }
-    
-    if paths.is_empty() {
-        println!("No files or directories found matching '{}'", search_pattern);
-        exit(1);
-    }
-    
-    // Load frequency data for sorting
-    let frequency_map = load_frequency_data();
-    
-    // Filter for directories only and create DirectoryEntry with frequency data
-    let mut directories: Vec<DirectoryEntry> = paths
-        .iter()
-        .filter(|&&path| Path::new(path).is_dir())
-        .map(|&path| {
-            let count = frequency_map.get(path).unwrap_or(&0);
-            DirectoryEntry {
-                path: path.to_string(),
-                count: *count,
-            }
-        })
-        .collect();
-    
-    if directories.is_empty() {
-        println!("Found {} matches in first 100 results, but none are directories:", paths.len());
-        for path in paths.iter().take(5) {
-            println!("  {}", path);
-        }
-        if paths.len() > 5 {
-            println!("  ... and {} more", paths.len() - 5);
-        }
-        println!("Try a more specific search pattern or update the locate database with 'sudo updatedb'");
-        exit(1);
-    }
-    
-    // Sort by frequency (highest first), then by shortest path length
-    directories.sort_by(|a, b| {
-        b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
-    });
-    
-    let target_dir = &directories[0].path;
-    
-    // Verify the directory exists and is accessible
-    if !Path::new(target_dir).exists() {
-        eprintln!("Directory '{}' does not exist", target_dir);
-        exit(1);
-    }
-    
-    if !Path::new(target_dir).is_dir() {
-        eprintln!("'{}' is not a directory", target_dir);
-        exit(1);
-    }
-    
-    // Output the directory path for shell integration
-    // The shell wrapper should capture this and execute: cd "$output"
-    println!("{}", target_dir);
-    
-    // Also provide feedback to stderr so it doesn't interfere with the path output
-    let freq_info = if directories[0].count > 0 {
-        format!(" (used {} times)", directories[0].count)
-    } else {
-        String::new()
-    };
-    eprintln!("Found {} directories in first 100 results, selected: {}{}", directories.len(), target_dir, freq_info);
 }
 
-#[derive(Debug, Clone)]
+// Data structures
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct DirectoryEntry {
     path: String,
     count: u32,
+}
+
+impl DirectoryEntry {
+    fn new(path: String, count: u32) -> Self {
+        Self { path, count }
+    }
 }
 
 struct App {
@@ -159,131 +77,82 @@ struct App {
 }
 
 impl App {
-    fn new() -> App {
-        let frequency_map = load_frequency_data();
-        App {
+    fn new() -> Result<Self, CddError> {
+        let frequency_map = FrequencyManager::load()?;
+        Ok(Self {
             input: String::new(),
             directories: Vec::new(),
             list_state: ListState::default(),
             should_quit: false,
             user_selected: false,
             frequency_map,
-        }
+        })
     }
 
-    fn search_directories(&mut self) {
+    fn search_directories(&mut self) -> Result<(), CddError> {
         if self.input.is_empty() {
             self.directories.clear();
             self.list_state.select(None);
-            return;
+            return Ok(());
         }
 
-        // Run locate command
-        let output = Command::new("locate")
-            .arg("--limit")
-            .arg("100")
-            .arg(&self.input)
-            .output();
-
-        match output {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let paths: Vec<&str> = stdout.lines().collect();
-                
-                // Filter for directories only and create DirectoryEntry with frequency data
-                let mut directories: Vec<DirectoryEntry> = paths
-                    .iter()
-                    .filter(|&&path| Path::new(path).is_dir())
-                    .map(|&path| {
-                        let count = self.frequency_map.get(path).unwrap_or(&0);
-                        DirectoryEntry {
-                            path: path.to_string(),
-                            count: *count,
-                        }
-                    })
-                    .collect();
-                
-                // Sort by frequency (highest first), then by shortest path length
-                directories.sort_by(|a, b| {
-                    b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
-                });
-                
-                self.directories = directories;
-                
-                // Reset selection to first item if we have results
-                if !self.directories.is_empty() {
-                    self.list_state.select(Some(0));
-                } else {
-                    self.list_state.select(None);
-                }
-            }
-            Err(_) => {
-                self.directories.clear();
-                self.list_state.select(None);
-            }
+        let directories = DirectorySearcher::search(&self.input, &self.frequency_map)?;
+        self.directories = directories;
+        
+        // Reset selection to first item if we have results
+        if !self.directories.is_empty() {
+            self.list_state.select(Some(0));
+        } else {
+            self.list_state.select(None);
         }
+        
+        Ok(())
     }
 
-    fn next(&mut self) {
+    fn navigate(&mut self, direction: NavigationDirection) {
         if self.directories.is_empty() {
             return;
         }
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i >= self.directories.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
+
+        let new_index = match direction {
+            NavigationDirection::Next => self.calculate_next_index(),
+            NavigationDirection::Previous => self.calculate_previous_index(),
+            NavigationDirection::PageUp => self.calculate_page_up_index(),
+            NavigationDirection::PageDown => self.calculate_page_down_index(),
+            NavigationDirection::First => 0,
+            NavigationDirection::Last => self.directories.len() - 1,
         };
-        self.list_state.select(Some(i));
+
+        self.list_state.select(Some(new_index));
     }
 
-    fn previous(&mut self) {
-        if self.directories.is_empty() {
-            return;
-        }
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.directories.len() - 1
-                } else {
-                    i - 1
-                }
-            }
+    fn calculate_next_index(&self) -> usize {
+        match self.list_state.selected() {
+            Some(i) if i >= self.directories.len() - 1 => 0,
+            Some(i) => i + 1,
             None => 0,
-        };
-        self.list_state.select(Some(i));
+        }
     }
 
-    fn page_up(&mut self) {
-        if self.directories.is_empty() {
-            return;
-        }
-        let page_size = 10; // Move 10 items at a time
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i >= page_size {
-                    i - page_size
-                } else {
-                    0
-                }
-            }
+    fn calculate_previous_index(&self) -> usize {
+        match self.list_state.selected() {
+            Some(0) => self.directories.len() - 1,
+            Some(i) => i - 1,
             None => 0,
-        };
-        self.list_state.select(Some(i));
+        }
     }
 
-    fn page_down(&mut self) {
-        if self.directories.is_empty() {
-            return;
+    fn calculate_page_up_index(&self) -> usize {
+        match self.list_state.selected() {
+            Some(i) if i >= PAGE_SIZE => i - PAGE_SIZE,
+            _ => 0,
         }
-        let page_size = 10; // Move 10 items at a time
-        let i = match self.list_state.selected() {
+    }
+
+    fn calculate_page_down_index(&self) -> usize {
+        match self.list_state.selected() {
             Some(i) => {
-                let new_pos = i + page_size;
+                let new_pos = i + PAGE_SIZE;
                 if new_pos >= self.directories.len() {
                     self.directories.len() - 1
                 } else {
@@ -291,29 +160,16 @@ impl App {
                 }
             }
             None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    fn go_to_first(&mut self) {
-        if !self.directories.is_empty() {
-            self.list_state.select(Some(0));
         }
     }
 
-    fn go_to_last(&mut self) {
-        if !self.directories.is_empty() {
-            self.list_state.select(Some(self.directories.len() - 1));
-        }
-    }
-
-    fn reset_frequency(&mut self) {
+    fn reset_frequency(&mut self) -> Result<(), CddError> {
         if let Some(selected_dir) = self.get_selected_directory() {
             let path = selected_dir.clone();
             
             // Remove from frequency map and save
             self.frequency_map.remove(&path);
-            save_frequency_data(&self.frequency_map);
+            FrequencyManager::save(&self.frequency_map)?;
             
             // Update the current directory entry to show count as 0
             if let Some(i) = self.list_state.selected() {
@@ -323,28 +179,200 @@ impl App {
             }
             
             // Re-sort the directories since frequency changed
-            self.directories.sort_by(|a, b| {
-                b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
-            });
+            DirectorySearcher::sort_directories(&mut self.directories);
             
             // Find the new position of the directory we just reset
-            let new_index = self.directories.iter().position(|entry| entry.path == path);
-            if let Some(new_index) = new_index {
+            if let Some(new_index) = self.directories.iter().position(|entry| entry.path == path) {
                 self.list_state.select(Some(new_index));
             }
         }
+        Ok(())
     }
 
     fn get_selected_directory(&self) -> Option<&String> {
-        if let Some(i) = self.list_state.selected() {
-            self.directories.get(i).map(|entry| &entry.path)
-        } else {
-            None
-        }
+        self.list_state
+            .selected()
+            .and_then(|i| self.directories.get(i))
+            .map(|entry| &entry.path)
     }
 }
 
-fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
+// Navigation enum for better type safety
+#[derive(Debug, Clone, Copy)]
+enum NavigationDirection {
+    Next,
+    Previous,
+    PageUp,
+    PageDown,
+    First,
+    Last,
+}
+
+// Frequency management module
+struct FrequencyManager;
+
+impl FrequencyManager {
+    fn get_file_path() -> PathBuf {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        Path::new(&home).join(FREQUENCY_FILE_NAME)
+    }
+
+    fn load() -> Result<HashMap<String, u32>, CddError> {
+        let mut frequency_map = HashMap::new();
+        let freq_file = Self::get_file_path();
+        
+        if let Ok(file) = fs::File::open(&freq_file) {
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line?;
+                if let Some((count_str, path)) = line.split_once('\t') {
+                    if let Ok(count) = count_str.parse::<u32>() {
+                        frequency_map.insert(path.to_string(), count);
+                    }
+                }
+            }
+        }
+        
+        Ok(frequency_map)
+    }
+
+    fn save(frequency_map: &HashMap<String, u32>) -> Result<(), CddError> {
+        let freq_file = Self::get_file_path();
+        let mut file = fs::File::create(&freq_file)?;
+        
+        for (path, count) in frequency_map {
+            writeln!(file, "{}\t{}", count, path)?;
+        }
+        
+        Ok(())
+    }
+
+    fn increment(path: &str) -> Result<(), CddError> {
+        let mut frequency_map = Self::load()?;
+        let count = frequency_map.get(path).unwrap_or(&0) + 1;
+        frequency_map.insert(path.to_string(), count);
+        Self::save(&frequency_map)
+    }
+}
+
+// Directory search module
+struct DirectorySearcher;
+
+impl DirectorySearcher {
+    fn search(pattern: &str, frequency_map: &HashMap<String, u32>) -> Result<Vec<DirectoryEntry>, CddError> {
+        let output = Command::new("locate")
+            .arg("--limit")
+            .arg(LOCATE_LIMIT)
+            .arg(pattern)
+            .output()
+            .map_err(|e| CddError::LocateCommand(format!("Failed to execute locate: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let paths: Vec<&str> = stdout.lines().collect();
+
+        if paths.is_empty() {
+            return Err(CddError::NoDirectoriesFound);
+        }
+
+        let mut directories: Vec<DirectoryEntry> = paths
+            .iter()
+            .filter(|&&path| Path::new(path).is_dir())
+            .map(|&path| {
+                let count = frequency_map.get(path).unwrap_or(&0);
+                DirectoryEntry::new(path.to_string(), *count)
+            })
+            .collect();
+
+        if directories.is_empty() {
+            return Err(CddError::NoDirectoriesFound);
+        }
+
+        Self::sort_directories(&mut directories);
+        Ok(directories)
+    }
+
+    fn sort_directories(directories: &mut [DirectoryEntry]) {
+        directories.sort_by(|a, b| {
+            b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
+        });
+    }
+}
+
+// Main application logic
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
+        exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = env::args().collect();
+    
+    match args.len() {
+        1 => print_help(),
+        2 => match args[1].as_str() {
+            "-i" => run_interactive_mode()?,
+            "--help" | "-h" => print_help(),
+            pattern => search_and_change_directory(pattern)?,
+        },
+        3 if args[1] == "--increment" => {
+            FrequencyManager::increment(&args[2])?;
+        },
+        _ => {
+            let pattern = &args[1];
+            search_and_change_directory(pattern)?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error>> {
+    eprintln!("Searching for directories matching: {}", search_pattern);
+    
+    let frequency_map = FrequencyManager::load()?;
+    let directories = DirectorySearcher::search(search_pattern, &frequency_map)
+        .map_err(|e| match e {
+            CddError::NoDirectoriesFound => {
+                eprintln!("No directories found matching '{}'", search_pattern);
+                exit(1);
+            }
+            other => other,
+        })?;
+
+    let target_dir = &directories[0].path;
+    
+    // Verify the directory exists and is accessible
+    if !Path::new(target_dir).exists() {
+        return Err(CddError::DirectoryNotFound(target_dir.clone()).into());
+    }
+    
+    if !Path::new(target_dir).is_dir() {
+        return Err(CddError::DirectoryNotFound(target_dir.clone()).into());
+    }
+    
+    // Output the directory path for shell integration
+    println!("{}", target_dir);
+    
+    // Provide feedback to stderr
+    let freq_info = if directories[0].count > 0 {
+        format!(" (used {} times)", directories[0].count)
+    } else {
+        String::new()
+    };
+    eprintln!(
+        "Found {} directories in first {} results, selected: {}{}",
+        directories.len(),
+        LOCATE_LIMIT,
+        target_dir,
+        freq_info
+    );
+    
+    Ok(())
+}
+
+fn run_interactive_mode() -> Result<(), Box<dyn Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -353,7 +381,7 @@ fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::new();
+    let mut app = App::new()?;
     let res = run_app(&mut terminal, &mut app);
 
     // Restore terminal
@@ -365,24 +393,28 @@ fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
-    if let Err(err) = res {
-        eprintln!("{:?}", err);
-        exit(1);
-    } else if app.user_selected {
-        if let Some(selected_dir) = app.get_selected_directory() {
-            // Increment frequency count for the selected directory
-            increment_frequency(selected_dir);
-            
-            // Output the selected directory to file descriptor 3 if available, otherwise stdout
-            if let Ok(mut fd3) = std::fs::OpenOptions::new().write(true).open("/proc/self/fd/3") {
-                let _ = writeln!(fd3, "{}", selected_dir);
-            } else {
-                println!("{}", selected_dir);
+    match res {
+        Err(err) => {
+            eprintln!("{:?}", err);
+            exit(1);
+        }
+        Ok(()) if app.user_selected => {
+            if let Some(selected_dir) = app.get_selected_directory() {
+                // Increment frequency count for the selected directory
+                FrequencyManager::increment(selected_dir)?;
+                
+                // Output the selected directory to file descriptor 3 if available, otherwise stdout
+                if let Ok(mut fd3) = fs::OpenOptions::new().write(true).open("/proc/self/fd/3") {
+                    writeln!(fd3, "{}", selected_dir)?;
+                } else {
+                    println!("{}", selected_dir);
+                }
             }
         }
-    } else {
-        // User quit without selecting - exit with code 1
-        exit(1);
+        Ok(()) => {
+            // User quit without selecting - exit with code 1
+            exit(1);
+        }
     }
 
     Ok(())
@@ -409,32 +441,20 @@ fn run_app<B: ratatui::backend::Backend>(
                     }
                     KeyCode::Char(c) => {
                         app.input.push(c);
-                        app.search_directories();
+                        let _ = app.search_directories(); // Ignore search errors in interactive mode
                     }
                     KeyCode::Backspace => {
                         app.input.pop();
-                        app.search_directories();
+                        let _ = app.search_directories(); // Ignore search errors in interactive mode
                     }
-                    KeyCode::Down => {
-                        app.next();
-                    }
-                    KeyCode::Up => {
-                        app.previous();
-                    }
-                    KeyCode::PageUp => {
-                        app.page_up();
-                    }
-                    KeyCode::PageDown => {
-                        app.page_down();
-                    }
-                    KeyCode::Home => {
-                        app.go_to_first();
-                    }
-                    KeyCode::End => {
-                        app.go_to_last();
-                    }
+                    KeyCode::Down => app.navigate(NavigationDirection::Next),
+                    KeyCode::Up => app.navigate(NavigationDirection::Previous),
+                    KeyCode::PageUp => app.navigate(NavigationDirection::PageUp),
+                    KeyCode::PageDown => app.navigate(NavigationDirection::PageDown),
+                    KeyCode::Home => app.navigate(NavigationDirection::First),
+                    KeyCode::End => app.navigate(NavigationDirection::Last),
                     KeyCode::Delete => {
-                        app.reset_frequency();
+                        let _ = app.reset_frequency(); // Ignore errors in interactive mode
                     }
                     _ => {}
                 }
@@ -459,35 +479,29 @@ fn ui(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    // Input box
+    render_input_box(f, app, chunks[0]);
+    render_results_list(f, app, chunks[1]);
+    render_help_text(f, chunks[2]);
+
+    // Set cursor position in input box
+    f.set_cursor_position((chunks[0].x + app.input.len() as u16 + 1, chunks[0].y + 1));
+}
+
+fn render_input_box(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let input = Paragraph::new(app.input.as_str())
         .style(Style::default().fg(Color::Yellow))
         .block(Block::default().borders(Borders::ALL).title("Search Pattern"));
-    f.render_widget(input, chunks[0]);
+    f.render_widget(input, area);
+}
 
-    // Results list
+fn render_results_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = app
         .directories
         .iter()
-        .map(|dir| {
-            if dir.count > 0 {
-                // Use spans to create visually distinct formatting
-                let content = Line::from(vec![
-                    Span::raw(&dir.path),
-                    Span::styled(
-                        format!(" [{}]", dir.count),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                    ),
-                ]);
-                ListItem::new(content)
-            } else {
-                let content = Line::from(Span::raw(&dir.path));
-                ListItem::new(content)
-            }
-        })
+        .map(|dir| create_list_item(dir))
         .collect();
 
-    let items = List::new(items)
+    let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(format!(
             "Directories ({} found)",
             app.directories.len()
@@ -500,58 +514,29 @@ fn ui(f: &mut Frame, app: &App) {
         )
         .highlight_symbol(">> ");
 
-    f.render_stateful_widget(items, chunks[1], &mut app.list_state.clone());
+    f.render_stateful_widget(list, area, &mut app.list_state.clone());
+}
 
-    // Help text
+fn create_list_item(dir: &DirectoryEntry) -> ListItem {
+    if dir.count > 0 {
+        let content = Line::from(vec![
+            Span::raw(&dir.path),
+            Span::styled(
+                format!(" [{}]", dir.count),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            ),
+        ]);
+        ListItem::new(content)
+    } else {
+        ListItem::new(Line::from(Span::raw(&dir.path)))
+    }
+}
+
+fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
     let help = Paragraph::new("↑/↓: Navigate | PgUp/PgDn: Page | Home/End: First/Last | Del: Reset Count | Enter: Select | q/Esc: Quit")
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().borders(Borders::ALL).title("Help"));
-    f.render_widget(help, chunks[2]);
-
-    // Set cursor position in input box
-    f.set_cursor_position((chunks[0].x + app.input.len() as u16 + 1, chunks[0].y + 1));
-}
-
-fn get_frequency_file_path() -> std::path::PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cdd_frequency")
-}
-
-fn load_frequency_data() -> HashMap<String, u32> {
-    let mut frequency_map = HashMap::new();
-    let freq_file = get_frequency_file_path();
-    
-    if let Ok(file) = fs::File::open(&freq_file) {
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                let parts: Vec<&str> = line.splitn(2, '\t').collect();
-                if parts.len() == 2 {
-                    if let Ok(count) = parts[0].parse::<u32>() {
-                        frequency_map.insert(parts[1].to_string(), count);
-                    }
-                }
-            }
-        }
-    }
-    
-    frequency_map
-}
-
-fn save_frequency_data(frequency_map: &HashMap<String, u32>) {
-    let freq_file = get_frequency_file_path();
-    if let Ok(mut file) = fs::File::create(&freq_file) {
-        for (path, count) in frequency_map {
-            let _ = writeln!(file, "{}\t{}", count, path);
-        }
-    }
-}
-
-fn increment_frequency(path: &str) {
-    let mut frequency_map = load_frequency_data();
-    let count = frequency_map.get(path).unwrap_or(&0) + 1;
-    frequency_map.insert(path.to_string(), count);
-    save_frequency_data(&frequency_map);
+    f.render_widget(help, area);
 }
 
 fn print_help() {
@@ -559,7 +544,7 @@ fn print_help() {
     println!();
     println!("USAGE:");
     println!("    cdd                    Enter interactive mode");
-    println!("    cdd <search_pattern>   Search for directories matching pattern (case-insensitive)");
+    println!("    cdd <search_pattern>   Search for directories matching pattern");
     println!();
     println!("DESCRIPTION:");
     println!("    Uses the locate database to quickly look up directories to cd into.");
