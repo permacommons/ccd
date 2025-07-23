@@ -408,6 +408,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         1 => print_help(),
         2 => match args[1].as_str() {
             "-i" => run_interactive_mode()?,
+            "-b" | "--bookmark" => bookmark_current_directory()?,
             "--help" | "-h" => print_help(),
             pattern => search_and_change_directory(pattern)?,
         },
@@ -418,6 +419,26 @@ fn run() -> Result<(), Box<dyn Error>> {
             let pattern = &args[1];
             search_and_change_directory(pattern)?;
         }
+    }
+    
+    Ok(())
+}
+
+fn bookmark_current_directory() -> Result<(), Box<dyn Error>> {
+    let current_dir = env::current_dir()
+        .map_err(|e| CddError::IoError(e))?
+        .to_string_lossy()
+        .to_string();
+    
+    let mut frequency_map = FrequencyManager::load()?;
+    
+    // Only add if not already in the frequency map
+    if !frequency_map.contains_key(&current_dir) {
+        frequency_map.insert(current_dir.clone(), 1);
+        FrequencyManager::save(&frequency_map)?;
+        eprintln!("Bookmarked: {}", current_dir);
+    } else {
+        eprintln!("Directory already bookmarked: {}", current_dir);
     }
     
     Ok(())
@@ -674,6 +695,7 @@ fn print_help() {
     println!();
     println!("USAGE:");
     println!("    ccd-pick -i                   Enter interactive mode");
+    println!("    ccd-pick -b                   Bookmark current directory");
     println!("    ccd-pick <search_pattern>     Search for directories matching pattern");
     println!();
     println!("DESCRIPTION:");
@@ -682,11 +704,13 @@ fn print_help() {
     println!("    Usually invoked via the ccd wrapper function.");
     println!();
     println!("OPTIONS:");
-    println!("    -h, --help    Show this help message");
-    println!("    -i            Interactive mode (used internally by shell wrapper)");
+    println!("    -h, --help       Show this help message");
+    println!("    -i               Interactive mode (used internally by shell wrapper)");
+    println!("    -b, --bookmark   Add current directory to bookmarks with frequency 1");
     println!();
     println!("EXAMPLES:");
     println!("    ccd-pick -i      # Enter interactive mode");
+    println!("    ccd-pick -b      # Bookmark current directory");
     println!("    ccd-pick proj    # Find directories containing 'proj'");
     println!("    ccd-pick Docs    # Find directories containing 'Docs'");
     println!();
