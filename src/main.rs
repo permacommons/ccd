@@ -584,8 +584,12 @@ fn ui(f: &mut Frame, app: &App) {
 }
 
 fn render_input_box(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let (input_text, input_style) = if app.input.is_empty() && app.view_mode == ViewMode::Search {
-        ("Start typing or press [Tab] to see frequent choices", Style::default().fg(Color::DarkGray))
+    let (input_text, input_style) = if app.input.is_empty() {
+        let placeholder = match app.view_mode {
+            ViewMode::Search => "Start typing or press [Tab] to see frequent choices",
+            ViewMode::Frequent => "Search the list below, or press [Tab] to search across all directories",
+        };
+        (placeholder, Style::default().fg(Color::DarkGray))
     } else {
         (app.input.as_str(), Style::default().fg(Color::Yellow))
     };
@@ -595,9 +599,14 @@ fn render_input_box(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ViewMode::Frequent => "Search Frequently Used",
     };
     
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(title, Style::default().fg(Color::Gray)))
+        .border_style(Style::default().fg(Color::Gray));
+    
     let input = Paragraph::new(input_text)
         .style(input_style)
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .block(block);
     f.render_widget(input, area);
 }
 
