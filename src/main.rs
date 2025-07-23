@@ -26,6 +26,13 @@ const LOCATE_LIMIT: &str = "100";
 const PAGE_SIZE: usize = 10;
 const FREQUENCY_FILE_NAME: &str = ".ccd_frequency";
 
+// View modes for the interactive interface
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    Search,
+    Frequent,
+}
+
 // Custom error types
 #[derive(Debug)]
 enum CddError {
@@ -74,6 +81,7 @@ struct App {
     should_quit: bool,
     user_selected: bool,
     frequency_map: HashMap<String, u32>,
+    view_mode: ViewMode,
 }
 
 impl App {
@@ -86,6 +94,7 @@ impl App {
             should_quit: false,
             user_selected: false,
             frequency_map,
+            view_mode: ViewMode::Search,
         })
     }
 
@@ -96,8 +105,17 @@ impl App {
             return Ok(());
         }
 
-        let directories = DirectorySearcher::search(&self.input, &self.frequency_map)?;
-        self.directories = directories;
+        // Search and handle the case where no results are found
+        match DirectorySearcher::search(&self.input, &self.frequency_map) {
+            Ok(directories) => {
+                self.directories = directories;
+            }
+            Err(CddError::NoDirectoriesFound) => {
+                // Clear results when no directories are found
+                self.directories.clear();
+            }
+            Err(e) => return Err(e),
+        }
         
         // Reset selection to first item if we have results
         if !self.directories.is_empty() {
@@ -194,6 +212,83 @@ impl App {
             .selected()
             .and_then(|i| self.directories.get(i))
             .map(|entry| &entry.path)
+    }
+
+    fn toggle_view_mode(&mut self) {
+        match self.view_mode {
+            ViewMode::Search => {
+                self.view_mode = ViewMode::Frequent;
+                self.show_frequent_directories();
+            }
+            ViewMode::Frequent => {
+                self.view_mode = ViewMode::Search;
+                // Return to search mode - if there's input, search, otherwise clear
+                if !self.input.is_empty() {
+                    let _ = self.search_directories();
+                } else {
+                    self.directories.clear();
+                    self.list_state.select(None);
+                }
+            }
+        }
+    }
+
+    fn show_frequent_directories(&mut self) {
+        // Get all directories with frequency > 0, sorted by frequency
+        let mut frequent_dirs: Vec<DirectoryEntry> = self.frequency_map
+            .iter()
+            .filter(|(path, count)| **count > 0 && Path::new(path).is_dir())
+            .map(|(path, count)| DirectoryEntry::new(path.clone(), *count))
+            .collect();
+
+        // Sort by frequency (descending), then by path length (ascending)
+        frequent_dirs.sort_by(|a, b| {
+            b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
+        });
+
+        // Apply search filter if there's input
+        if !self.input.is_empty() {
+            frequent_dirs.retain(|entry| {
+                entry.path.to_lowercase().contains(&self.input.to_lowercase())
+            });
+        }
+
+        self.directories = frequent_dirs;
+        
+        // Reset selection to first item if we have results
+        if !self.directories.is_empty() {
+            self.list_state.select(Some(0));
+        } else {
+            self.list_state.select(None);
+        }
+    }
+
+    fn handle_character_input(&mut self, c: char) {
+        self.input.push(c);
+        
+        // Apply search to current view mode
+        match self.view_mode {
+            ViewMode::Search => {
+                let _ = self.search_directories();
+            }
+            ViewMode::Frequent => {
+                self.show_frequent_directories();
+            }
+        }
+    }
+
+    fn handle_backspace(&mut self) {
+        self.input.pop();
+        
+        // Apply search to current view mode
+        match self.view_mode {
+            ViewMode::Search => {
+                let _ = self.search_directories();
+            }
+            ViewMode::Frequent => {
+                self.show_frequent_directories();
+            }
+        }
     }
 }
 
@@ -439,13 +534,14 @@ fn run_app<B: ratatui::backend::Backend>(
                             app.should_quit = true;
                         }
                     }
+                    KeyCode::Tab => {
+                        app.toggle_view_mode();
+                    }
                     KeyCode::Char(c) => {
-                        app.input.push(c);
-                        let _ = app.search_directories(); // Ignore search errors in interactive mode
+                        app.handle_character_input(c);
                     }
                     KeyCode::Backspace => {
-                        app.input.pop();
-                        let _ = app.search_directories(); // Ignore search errors in interactive mode
+                        app.handle_backspace();
                     }
                     KeyCode::Down => app.navigate(NavigationDirection::Next),
                     KeyCode::Up => app.navigate(NavigationDirection::Previous),
@@ -488,24 +584,49 @@ fn ui(f: &mut Frame, app: &App) {
 }
 
 fn render_input_box(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let input = Paragraph::new(app.input.as_str())
-        .style(Style::default().fg(Color::Yellow))
-        .block(Block::default().borders(Borders::ALL).title("Search Pattern"));
+    let (input_text, input_style) = if app.input.is_empty() && app.view_mode == ViewMode::Search {
+        ("Start typing or press [Tab] to see frequent choices", Style::default().fg(Color::DarkGray))
+    } else {
+        (app.input.as_str(), Style::default().fg(Color::Yellow))
+    };
+    
+    let title = match app.view_mode {
+        ViewMode::Search => "Search All Directories",
+        ViewMode::Frequent => "Search Frequently Used",
+    };
+    
+    let input = Paragraph::new(input_text)
+        .style(input_style)
+        .block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(input, area);
 }
 
 fn render_results_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let items: Vec<ListItem> = app
-        .directories
-        .iter()
-        .map(|dir| create_list_item(dir))
-        .collect();
+    let items: Vec<ListItem> = if app.directories.is_empty() && app.view_mode == ViewMode::Frequent {
+        vec![ListItem::new(Line::from(Span::styled(
+            "No frequently used directories found",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+        )))]
+    } else {
+        app.directories
+            .iter()
+            .map(|dir| create_list_item(dir))
+            .collect()
+    };
+
+    let title = match app.view_mode {
+        ViewMode::Search => format!("Search Results ({} found)", app.directories.len()),
+        ViewMode::Frequent => {
+            if app.directories.is_empty() {
+                "Frequent Directories (none)".to_string()
+            } else {
+                format!("Frequent Directories ({} found)", app.directories.len())
+            }
+        }
+    };
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            "Directories ({} found)",
-            app.directories.len()
-        )))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .bg(Color::LightGreen)
@@ -533,7 +654,7 @@ fn create_list_item(dir: &DirectoryEntry) -> ListItem {
 }
 
 fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
-    let help = Paragraph::new("↑/↓: Navigate | PgUp/PgDn: Page | Home/End: First/Last | Del: Reset Count | Enter: Select | q/Esc: Quit")
+    let help = Paragraph::new("↑/↓: Navigate | PgUp/PgDn: Page | Home/End: First/Last | Tab: Toggle View | Del: Reset Count | Enter: Select | q/Esc: Quit")
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(help, area);
@@ -562,7 +683,7 @@ fn print_help() {
     println!();
     println!("INTERACTIVE MODE:");
     println!("    Type to search, use ↑/↓ to navigate, PgUp/PgDn for fast navigation");
-    println!("    Home/End to jump to first/last, Del to reset frequency count");
-    println!("    Enter to select, q/Esc to quit");
+    println!("    Home/End to jump to first/last, Tab to toggle frequent/search view");
+    println!("    Del to reset frequency count, Enter to select, q/Esc to quit");
     println!("    Directories are sorted by usage frequency (most used first)");
 }

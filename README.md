@@ -59,12 +59,24 @@ ccd
 
 **Interactive Mode Controls:**
 - Type to search for directories
+- `Tab`: Toggle between search mode and frequent directories view
 - `↑/↓`: Navigate through results
 - `PgUp/PgDn`: Fast navigation (10 items at a time)
 - `Home/End`: Jump to first/last result
 - `Enter`: Select directory and change to it
 - `Delete`: Reset frequency count for selected directory
 - `q/Esc`: Quit without changing directory
+
+**Search Mode:**
+- Shows placeholder text: "Start typing or press [Tab] to see frequent choices"
+- Type to search directories using the locate database
+- Results sorted by frequency, then by path length
+
+**Frequent Mode:**
+- Press `Tab` to view your most frequently used directories
+- Shows directories sorted by usage count (most used first)
+- Press `Tab` again to return to search mode
+- Shows "No frequently used directories found" if none exist
 
 ### Direct Search
 ```bash
