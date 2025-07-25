@@ -618,7 +618,7 @@ fn run_app<B: ratatui::backend::Backend>(
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
+                    KeyCode::Esc => {
                         app.should_quit = true;
                     }
                     KeyCode::Enter => {
@@ -771,7 +771,7 @@ fn create_list_item(dir: &DirectoryEntry) -> ListItem {
 }
 
 fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
-    let help = Paragraph::new("↑/↓: Navigate | Home/End: First/Last | Shift+Del: Reset Count | Enter: Select | q/Esc: Quit")
+    let help = Paragraph::new("↑/↓: Navigate | Home/End: First/Last | Shift+Del: Reset Count | Enter: Select | Esc: Quit")
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(help, area);
@@ -804,6 +804,6 @@ fn print_help() {
     println!("INTERACTIVE MODE:");
     println!("    Type to search, use ↑/↓ to navigate, PgUp/PgDn for fast navigation");
     println!("    Home/End to jump to first/last, Tab to toggle frequent/search view");
-    println!("    Shift+Del to reset frequency count, Enter to select, q/Esc to quit");
+    println!("    Shift+Del to reset frequency count, Enter to select, Esc to quit");
     println!("    Directories are sorted by usage frequency (most used first)");
 }
