@@ -36,10 +36,10 @@ A fast, intelligent directory navigation tool that uses the `locate` database to
    source ~/.bashrc
    ```
 
-5. Make sure your locate database is up to date:
-   ```bash
-   sudo updatedb
-   ```
+The `ccd-pick` search functionality will only work if `locate` is installed and working, and the
+`locate` index is up-to-date. It is typically provided via the `plocate` package, which replaces
+the older `mlocate`, and the underlying database is usually regularly updated in the background
+via the `updatedb` command.
 
 ### Manual Installation
 
@@ -64,11 +64,10 @@ ccd
 - `PgUp/PgDn`: Fast navigation (10 items at a time)
 - `Home/End`: Jump to first/last result
 - `Enter`: Select directory and change to it
-- `Delete`: Reset frequency count for selected directory
+- `Shift+Delete`: Reset frequency count for selected directory
 - `q/Esc`: Quit without changing directory
 
 **Search Mode:**
-- Shows placeholder text: "Start typing or press [Tab] to see frequent choices"
 - Type to search directories using the locate database
 - Results sorted by frequency, then by path length
 
@@ -76,7 +75,7 @@ ccd
 - Press `Tab` to view your most frequently used directories
 - Shows directories sorted by usage count (most used first)
 - Press `Tab` again to return to search mode
-- Shows "No frequently used directories found" if none exist
+
 
 ### Direct Search
 ```bash
@@ -89,19 +88,21 @@ ccd --help
 
 ## How it works
 
+### Frequency Tracking
+- Each time you select a directory in the TUI, its usage count is incremented
+- If you feel lucky via `ccd <search>`, the count is _not_ incremented. This is to avoid tracking poor matches.
+- Frequently used directories appear at the top of search results
+- You can reset frequency counts using the `Shift+Delete` key in interactive mode
+- Frequency data is stored in `~/.ccd_frequency`
+
 ### Search Process
 1. The `ccd-pick` binary searches the locate database using `locate --limit 100 <pattern>`
 2. Filters results to show only directories
-3. Loads frequency data from `~/.kcd_frequency`
+3. Loads frequency data from `~/.ccd_frequency`
 4. Sorts results by usage frequency (most used first), then by path length
 5. In direct mode: changes to the first directory found
 6. In interactive mode: presents a TUI for selection
 
-### Frequency Tracking
-- Each time you select a directory, its usage count is incremented
-- Frequently used directories appear at the top of search results
-- You can reset frequency counts using the `Delete` key in interactive mode
-- Frequency data is stored in `~/.kcd_frequency`
 
 ### Shell Integration
 The tool uses a shell function wrapper (`ccd`) that calls the Rust binary (`ccd-pick`) and properly changes the current shell's directory. The binary outputs the target directory path, and the shell function captures this and executes `cd`.
@@ -118,8 +119,6 @@ $ ccd
 ### Direct Mode
 ```bash
 $ ccd tmp
-Searching for directories matching: tmp
-Found 19 directories in first 100 results, selected: /tmp (used 5 times)
 Changed to: /tmp
 
 $ ccd nonexistent
@@ -130,7 +129,7 @@ No directories found matching 'nonexistent'
 ## Requirements
 
 - **Rust** (for building the binary)
-- **locate** command (usually part of `findutils` or `mlocate` package)
+- **locate** command (usually part of `plocate` package)
 - **Updated locate database** (`sudo updatedb`)
 - **Bash** (for the shell wrapper)
 
@@ -153,22 +152,6 @@ cargo build --release
 
 # Install to ~/.cargo/bin
 cargo install --path . --locked
-```
-
-### Testing
-```bash
-# Run tests
-cargo test
-
-# Test interactive mode (after cargo install)
-ccd-pick -i
-
-# Test direct search (after cargo install)
-ccd-pick "search-term"
-
-# Or test with local build
-./target/debug/ccd-pick -i
-./target/debug/ccd-pick "search-term"
 ```
 
 ## Contributing
