@@ -6,6 +6,7 @@ A fast, intelligent directory navigation tool that uses the `locate` database to
 
 - **Fast search**: Uses the `locate` database for instant directory lookup
 - **Interactive mode**: Beautiful TUI interface for browsing and selecting directories
+- **Bookmarking**: Quickly add a directory to the "frequently used" list
 - **Frequency tracking**: Remembers and prioritizes frequently used directories selected via the TUI
 - **Smart sorting**: Results sorted by usage frequency, then by path length
 - **Keyboard navigation**: Full keyboard support for easy navigation
