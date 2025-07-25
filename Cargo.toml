@@ -7,7 +7,7 @@ license = "CC0-1.0"
 description = "A fast, intelligent directory navigation tool with frequency tracking"
 homepage = "https://github.com/permacommons/ccd"
 repository = "https://github.com/permacommons/ccd"
-keywords = ["cli", "directory", "navigation", "cd", "filesystem", "bash", "rust"]
+keywords = ["cli", "directory", "navigation", "cd", "filesystem"]
 categories = ["command-line-utilities", "filesystem"]
 readme = "README.md"
 
