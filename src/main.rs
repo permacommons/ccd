@@ -1,24 +1,26 @@
-use std::env;
-use std::process::{Command, exit};
-use std::path::{Path, PathBuf};
-use std::io::{self, BufRead, BufReader, Write};
-use std::fs;
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
 use std::fmt;
+use std::fs;
+use std::io::{self, BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, exit};
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame, Terminal,
 };
 
 // Constants
@@ -116,14 +118,14 @@ impl App {
             }
             Err(e) => return Err(e),
         }
-        
+
         // Reset selection to first item if we have results
         if !self.directories.is_empty() {
             self.list_state.select(Some(0));
         } else {
             self.list_state.select(None);
         }
-        
+
         Ok(())
     }
 
@@ -184,24 +186,44 @@ impl App {
     fn reset_frequency(&mut self) -> Result<(), CddError> {
         if let Some(selected_dir) = self.get_selected_directory() {
             let path = selected_dir.clone();
-            
+            let selected_index = self.list_state.selected().unwrap_or(0);
+
             // Remove from frequency map and save
             self.frequency_map.remove(&path);
             FrequencyManager::save(&self.frequency_map)?;
-            
-            // Update the current directory entry to show count as 0
-            if let Some(i) = self.list_state.selected() {
-                if let Some(entry) = self.directories.get_mut(i) {
-                    entry.count = 0;
+
+            match self.view_mode {
+                ViewMode::Frequent => {
+                    // In frequent mode, remove the directory from the list entirely
+                    self.directories.remove(selected_index);
+
+                    // Adjust selection after removal
+                    if self.directories.is_empty() {
+                        self.list_state.select(None);
+                    } else if selected_index >= self.directories.len() {
+                        // If we removed the last item, select the new last item
+                        self.list_state.select(Some(self.directories.len() - 1));
+                    } else {
+                        // Keep the same index, which now points to the next item
+                        self.list_state.select(Some(selected_index));
+                    }
                 }
-            }
-            
-            // Re-sort the directories since frequency changed
-            DirectorySearcher::sort_directories(&mut self.directories);
-            
-            // Find the new position of the directory we just reset
-            if let Some(new_index) = self.directories.iter().position(|entry| entry.path == path) {
-                self.list_state.select(Some(new_index));
+                ViewMode::Search => {
+                    // In search mode, update the entry to show count as 0
+                    if let Some(entry) = self.directories.get_mut(selected_index) {
+                        entry.count = 0;
+                    }
+
+                    // Re-sort the directories since frequency changed
+                    DirectorySearcher::sort_directories(&mut self.directories);
+
+                    // Find the new position of the directory we just reset
+                    if let Some(new_index) =
+                        self.directories.iter().position(|entry| entry.path == path)
+                    {
+                        self.list_state.select(Some(new_index));
+                    }
+                }
             }
         }
         Ok(())
@@ -235,26 +257,28 @@ impl App {
 
     fn show_frequent_directories(&mut self) {
         // Get all directories with frequency > 0, sorted by frequency
-        let mut frequent_dirs: Vec<DirectoryEntry> = self.frequency_map
+        let mut frequent_dirs: Vec<DirectoryEntry> = self
+            .frequency_map
             .iter()
             .filter(|(path, count)| **count > 0 && Path::new(path).is_dir())
             .map(|(path, count)| DirectoryEntry::new(path.clone(), *count))
             .collect();
 
         // Sort by frequency (descending), then by path length (ascending)
-        frequent_dirs.sort_by(|a, b| {
-            b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
-        });
+        frequent_dirs.sort_by(|a, b| b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len())));
 
         // Apply search filter if there's input
         if !self.input.is_empty() {
             frequent_dirs.retain(|entry| {
-                entry.path.to_lowercase().contains(&self.input.to_lowercase())
+                entry
+                    .path
+                    .to_lowercase()
+                    .contains(&self.input.to_lowercase())
             });
         }
 
         self.directories = frequent_dirs;
-        
+
         // Reset selection to first item if we have results
         if !self.directories.is_empty() {
             self.list_state.select(Some(0));
@@ -265,7 +289,7 @@ impl App {
 
     fn handle_character_input(&mut self, c: char) {
         self.input.push(c);
-        
+
         // Apply search to current view mode
         match self.view_mode {
             ViewMode::Search => {
@@ -279,7 +303,7 @@ impl App {
 
     fn handle_backspace(&mut self) {
         self.input.pop();
-        
+
         // Apply search to current view mode
         match self.view_mode {
             ViewMode::Search => {
@@ -315,7 +339,7 @@ impl FrequencyManager {
     fn load() -> Result<HashMap<String, u32>, CddError> {
         let mut frequency_map = HashMap::new();
         let freq_file = Self::get_file_path();
-        
+
         if let Ok(file) = fs::File::open(&freq_file) {
             let reader = BufReader::new(file);
             for line in reader.lines() {
@@ -327,18 +351,18 @@ impl FrequencyManager {
                 }
             }
         }
-        
+
         Ok(frequency_map)
     }
 
     fn save(frequency_map: &HashMap<String, u32>) -> Result<(), CddError> {
         let freq_file = Self::get_file_path();
         let mut file = fs::File::create(&freq_file)?;
-        
+
         for (path, count) in frequency_map {
             writeln!(file, "{}\t{}", count, path)?;
         }
-        
+
         Ok(())
     }
 
@@ -354,7 +378,14 @@ impl FrequencyManager {
 struct DirectorySearcher;
 
 impl DirectorySearcher {
-    fn search(pattern: &str, frequency_map: &HashMap<String, u32>) -> Result<Vec<DirectoryEntry>, CddError> {
+    fn search(
+        pattern: &str,
+        frequency_map: &HashMap<String, u32>,
+    ) -> Result<Vec<DirectoryEntry>, CddError> {
+        // Use a HashSet to deduplicate paths from both sources
+        let mut unique_paths = std::collections::HashSet::new();
+
+        // First, search using locate
         let output = Command::new("locate")
             .arg("--limit")
             .arg(LOCATE_LIMIT)
@@ -363,33 +394,43 @@ impl DirectorySearcher {
             .map_err(|e| CddError::LocateCommand(format!("Failed to execute locate: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let paths: Vec<&str> = stdout.lines().collect();
+        let locate_paths: Vec<&str> = stdout.lines().collect();
 
-        if paths.is_empty() {
+        // Add locate results to our set
+        for path in locate_paths {
+            if Path::new(path).is_dir() {
+                unique_paths.insert(path.to_string());
+            }
+        }
+
+        // Second, search through frequency map for paths that match the pattern
+        let pattern_lower = pattern.to_lowercase();
+        for (path, _count) in frequency_map {
+            if path.to_lowercase().contains(&pattern_lower) && Path::new(path).is_dir() {
+                unique_paths.insert(path.clone());
+            }
+        }
+
+        // If no directories found from either source, return error
+        if unique_paths.is_empty() {
             return Err(CddError::NoDirectoriesFound);
         }
 
-        let mut directories: Vec<DirectoryEntry> = paths
-            .iter()
-            .filter(|&&path| Path::new(path).is_dir())
-            .map(|&path| {
-                let count = frequency_map.get(path).unwrap_or(&0);
-                DirectoryEntry::new(path.to_string(), *count)
+        // Convert to DirectoryEntry with frequency data
+        let mut directories: Vec<DirectoryEntry> = unique_paths
+            .into_iter()
+            .map(|path| {
+                let count = frequency_map.get(&path).unwrap_or(&0);
+                DirectoryEntry::new(path, *count)
             })
             .collect();
-
-        if directories.is_empty() {
-            return Err(CddError::NoDirectoriesFound);
-        }
 
         Self::sort_directories(&mut directories);
         Ok(directories)
     }
 
     fn sort_directories(directories: &mut [DirectoryEntry]) {
-        directories.sort_by(|a, b| {
-            b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len()))
-        });
+        directories.sort_by(|a, b| b.count.cmp(&a.count).then(a.path.len().cmp(&b.path.len())));
     }
 }
 
@@ -403,7 +444,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    
+
     match args.len() {
         1 => print_help(),
         2 => match args[1].as_str() {
@@ -414,13 +455,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         },
         3 if args[1] == "--increment" => {
             FrequencyManager::increment(&args[2])?;
-        },
+        }
         _ => {
             let pattern = &args[1];
             search_and_change_directory(pattern)?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -429,9 +470,9 @@ fn bookmark_current_directory() -> Result<(), Box<dyn Error>> {
         .map_err(|e| CddError::IoError(e))?
         .to_string_lossy()
         .to_string();
-    
+
     let mut frequency_map = FrequencyManager::load()?;
-    
+
     // Only add if not already in the frequency map
     if !frequency_map.contains_key(&current_dir) {
         frequency_map.insert(current_dir.clone(), 1);
@@ -440,16 +481,16 @@ fn bookmark_current_directory() -> Result<(), Box<dyn Error>> {
     } else {
         eprintln!("Directory already bookmarked: {}", current_dir);
     }
-    
+
     Ok(())
 }
 
 fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error>> {
     eprintln!("Searching for directories matching: {}", search_pattern);
-    
+
     let frequency_map = FrequencyManager::load()?;
-    let directories = DirectorySearcher::search(search_pattern, &frequency_map)
-        .map_err(|e| match e {
+    let directories =
+        DirectorySearcher::search(search_pattern, &frequency_map).map_err(|e| match e {
             CddError::NoDirectoriesFound => {
                 eprintln!("No directories found matching '{}'", search_pattern);
                 exit(1);
@@ -458,19 +499,19 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
         })?;
 
     let target_dir = &directories[0].path;
-    
+
     // Verify the directory exists and is accessible
     if !Path::new(target_dir).exists() {
         return Err(CddError::DirectoryNotFound(target_dir.clone()).into());
     }
-    
+
     if !Path::new(target_dir).is_dir() {
         return Err(CddError::DirectoryNotFound(target_dir.clone()).into());
     }
-    
+
     // Output the directory path for shell integration
     println!("{}", target_dir);
-    
+
     // Provide feedback to stderr
     let freq_info = if directories[0].count > 0 {
         format!(" (used {} times)", directories[0].count)
@@ -484,7 +525,7 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
         target_dir,
         freq_info
     );
-    
+
     Ok(())
 }
 
@@ -518,7 +559,7 @@ fn run_interactive_mode() -> Result<(), Box<dyn Error>> {
             if let Some(selected_dir) = app.get_selected_directory() {
                 // Increment frequency count for the selected directory
                 FrequencyManager::increment(selected_dir)?;
-                
+
                 // Output the selected directory to file descriptor 3 if available, otherwise stdout
                 if let Ok(mut fd3) = fs::OpenOptions::new().write(true).open("/proc/self/fd/3") {
                     writeln!(fd3, "{}", selected_dir)?;
@@ -570,7 +611,7 @@ fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::PageDown => app.navigate(NavigationDirection::PageDown),
                     KeyCode::Home => app.navigate(NavigationDirection::First),
                     KeyCode::End => app.navigate(NavigationDirection::Last),
-                    KeyCode::Delete => {
+                    KeyCode::Delete if key.modifiers.contains(KeyModifiers::SHIFT) => {
                         let _ = app.reset_frequency(); // Ignore errors in interactive mode
                     }
                     _ => {}
@@ -608,34 +649,37 @@ fn render_input_box(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (input_text, input_style) = if app.input.is_empty() {
         let placeholder = match app.view_mode {
             ViewMode::Search => "Start typing or press [Tab] to see frequent choices",
-            ViewMode::Frequent => "Search the list below, or press [Tab] to search across all directories",
+            ViewMode::Frequent => {
+                "Search the list below, or press [Tab] to search across all directories"
+            }
         };
         (placeholder, Style::default().fg(Color::DarkGray))
     } else {
         (app.input.as_str(), Style::default().fg(Color::Yellow))
     };
-    
+
     let title = match app.view_mode {
         ViewMode::Search => "Search All Directories",
         ViewMode::Frequent => "Search Frequently Used",
     };
-    
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, Style::default().fg(Color::Gray)))
         .border_style(Style::default().fg(Color::Gray));
-    
-    let input = Paragraph::new(input_text)
-        .style(input_style)
-        .block(block);
+
+    let input = Paragraph::new(input_text).style(input_style).block(block);
     f.render_widget(input, area);
 }
 
 fn render_results_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let items: Vec<ListItem> = if app.directories.is_empty() && app.view_mode == ViewMode::Frequent {
+    let items: Vec<ListItem> = if app.directories.is_empty() && app.view_mode == ViewMode::Frequent
+    {
         vec![ListItem::new(Line::from(Span::styled(
             "No frequently used directories found",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
         )))]
     } else {
         app.directories
@@ -674,7 +718,9 @@ fn create_list_item(dir: &DirectoryEntry) -> ListItem {
             Span::raw(&dir.path),
             Span::styled(
                 format!(" [{}]", dir.count),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]);
         ListItem::new(content)
@@ -684,14 +730,14 @@ fn create_list_item(dir: &DirectoryEntry) -> ListItem {
 }
 
 fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
-    let help = Paragraph::new("↑/↓: Navigate | PgUp/PgDn: Page | Home/End: First/Last | Tab: Toggle View | Del: Reset Count | Enter: Select | q/Esc: Quit")
+    let help = Paragraph::new("↑/↓: Navigate | Home/End: First/Last | Shift+Del: Reset Count | Enter: Select | q/Esc: Quit")
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(help, area);
 }
 
 fn print_help() {
-    println!("ccd-pick - ChangeChange Directory");
+    println!("ccd-pick - Change Change Directory Picker");
     println!();
     println!("USAGE:");
     println!("    ccd-pick -i                   Enter interactive mode");
@@ -717,6 +763,6 @@ fn print_help() {
     println!("INTERACTIVE MODE:");
     println!("    Type to search, use ↑/↓ to navigate, PgUp/PgDn for fast navigation");
     println!("    Home/End to jump to first/last, Tab to toggle frequent/search view");
-    println!("    Del to reset frequency count, Enter to select, q/Esc to quit");
+    println!("    Shift+Del to reset frequency count, Enter to select, q/Esc to quit");
     println!("    Directories are sorted by usage frequency (most used first)");
 }

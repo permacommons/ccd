@@ -5,8 +5,22 @@
 # Usage: source ccd.sh
 
 ccd() {
-    if [ $# -eq 0 ]; then
-        # No arguments - enter interactive mode
+    # Show brief help for ccd command itself
+    if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+        echo "ccd - Change Change Directory"
+        echo ""
+        echo "USAGE:"
+        echo "    ccd                    Enter interactive directory picker"
+        echo "    ccd -i                 Enter interactive directory picker"
+        echo "    ccd -b                 Bookmark current directory"
+        echo "    ccd <pattern>          Search and change to directory matching pattern"
+        echo ""
+        echo "This wrapper calls the ccd-pick tool. For more detailed help, use: ccd-pick --help"
+        return
+    fi
+    
+    if [ $# -eq 0 ] || [ "$1" = "-i" ]; then
+        # No arguments or "-i" - enter interactive mode
         # Use file descriptor 3 to capture output while allowing TUI to use stdin/stdout/stderr
         local output
         exec 3>&1  # Save stdout to fd 3
@@ -23,9 +37,9 @@ ccd() {
             echo "Selection cancelled"
         fi
         return
-    elif [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-        # Show help
-        ccd-pick "$@"
+    elif [ "$1" = "-b" ]; then
+        # Bookmark current directory
+        ccd-pick -b
         return
     fi
     
