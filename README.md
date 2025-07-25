@@ -21,13 +21,13 @@ Note: `ccd-pick` needs the shell wrapper in [`ccd.sh`](ccd.sh) in order to chang
 
 1. Install the Rust binary to your PATH:
 
-   ```
+   ```bash
    cargo install ccd-pick
    ```
 
    Or, to build and install from the repository:
 
-  ```bash
+   ```bash
    cargo install --path . --locked
    ```
 
