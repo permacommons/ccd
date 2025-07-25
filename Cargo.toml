@@ -1,9 +1,15 @@
 [package]
 name = "ccd-pick"
 version = "0.1.0"
-edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2021"
+authors = ["Erik Moeller <erik@permacommons.org>"]
+license = "CC0-1.0"
+description = "A fast, intelligent directory navigation tool with frequency tracking"
+homepage = "https://github.com/permacommons/ccd"
+repository = "https://github.com/permacommons/ccd"
+keywords = ["cli", "directory", "navigation", "cd", "filesystem", "bash", "rust"]
+categories = ["command-line-utilities", "filesystem"]
+readme = "README.md"
 
 [dependencies]
 crossterm = "0.29.0"
