@@ -4,6 +4,8 @@ A fast, intelligent directory navigation tool that uses the `locate` database to
 
 Note: `ccd-pick` needs the shell wrapper in [`ccd.sh`](ccd.sh) in order to change directories. See below for details.
 
+![Screenshot showing the core functionality, selecting a directory via the TUI](screenshot.png)
+
 ## Features
 
 - **Fast search**: Uses the `locate` database for instant directory lookup
