@@ -38,9 +38,9 @@ Note: `ccd-pick` needs the shell wrapper in [`ccd.sh`](ccd.sh) in order to chang
    export PATH="$HOME/.cargo/bin:$PATH"
    ```
 
-3. Run the installer to add the shell function to your ~/.bashrc:
+3. Install the shell function to your ~/.bashrc:
    ```bash
-   ./install.sh
+   ccd-pick --install
    ```
 
 4. Reload your shell configuration:
@@ -55,10 +55,13 @@ via the `updatedb` command.
 
 ### Manual Installation
 
-If you prefer manual installation, you can source the shell wrapper directly:
+If you prefer manual installation, you can get the shell function and add it manually:
 ```bash
+# Print the shell function
+ccd-pick --printfn > ccd_function.sh
+
 # Add this to your ~/.bashrc or ~/.zshrc
-source /path/to/ccd/ccd.sh
+source /path/to/ccd_function.sh
 ```
 
 ## Usage
@@ -148,8 +151,8 @@ No directories found matching 'nonexistent'
 ## Project Structure
 
 - `src/main.rs` - Main Rust application (`ccd-pick` binary)
-- `ccd.sh` - Shell wrapper function
-- `install.sh` - Automated installer script
+- `ccd.sh` - Shell wrapper function (compiled into binary)
+- `build.rs` - Build script for compiling shell function
 - `Cargo.toml` - Rust project configuration
 
 ## Development

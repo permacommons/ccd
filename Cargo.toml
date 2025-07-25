@@ -1,6 +1,6 @@
 [package]
 name = "ccd-pick"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Erik Moeller <erik@permacommons.org>"]
 license = "CC0-1.0"
@@ -14,3 +14,6 @@ readme = "README.md"
 [dependencies]
 crossterm = "0.29.0"
 ratatui = "0.29.0"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[build-dependencies]

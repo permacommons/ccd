@@ -7,6 +7,11 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
+use chrono::Local;
+
+// Include the compiled shell function
+include!(concat!(env!("OUT_DIR"), "/ccd_shell_function.rs"));
+
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
@@ -457,6 +462,121 @@ impl DirectorySearcher {
     }
 }
 
+// Shell function installation and printing
+fn check_shell_compatibility() -> Result<(), Box<dyn Error>> {
+    let shell = env::var("SHELL").unwrap_or_else(|_| "unknown".to_string());
+
+    if !shell.ends_with("/bash") && !shell.ends_with("bash") {
+        eprintln!("Error: Only bash is currently supported.");
+        eprintln!("Your current shell is: {}", shell);
+        eprintln!("Please switch to bash or manually install the shell function.");
+        exit(1);
+    }
+
+    Ok(())
+}
+
+fn install_shell_function() -> Result<(), Box<dyn Error>> {
+    check_shell_compatibility()?;
+
+    let home = env::var("HOME").map_err(|_| "HOME environment variable not set")?;
+    let bashrc_path = Path::new(&home).join(".bashrc");
+
+    let marker_start = "# BEGIN ccd function";
+    let marker_end = "# END ccd function";
+
+    // Create backup if .bashrc exists
+    if bashrc_path.exists() {
+        let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
+        let backup_path = format!("{}.backup.{}", bashrc_path.display(), timestamp);
+        fs::copy(&bashrc_path, &backup_path)?;
+        eprintln!("Created backup: {}", backup_path);
+    }
+
+    // Read existing .bashrc content
+    let mut bashrc_content = if bashrc_path.exists() {
+        fs::read_to_string(&bashrc_path)?
+    } else {
+        String::new()
+    };
+
+    // Remove existing ccd function if present
+    if bashrc_content.contains(marker_start) {
+        eprintln!("Removing existing ccd function from ~/.bashrc...");
+        let lines: Vec<&str> = bashrc_content.lines().collect();
+        let mut new_lines = Vec::new();
+        let mut skip = false;
+
+        for line in lines {
+            if line.contains(marker_start) {
+                skip = true;
+                continue;
+            }
+            if line.contains(marker_end) {
+                skip = false;
+                continue;
+            }
+            if !skip {
+                new_lines.push(line);
+            }
+        }
+        bashrc_content = new_lines.join("\n");
+    }
+
+    // Extract just the ccd function from the shell script (skip shebang and comments)
+    let ccd_function = extract_ccd_function_from_script(CCD_SHELL_FUNCTION);
+
+    // Add the new ccd function
+    if !bashrc_content.is_empty() && !bashrc_content.ends_with('\n') {
+        bashrc_content.push('\n');
+    }
+
+    bashrc_content.push_str(&format!(
+        "\n{}\n# Shell wrapper for the ccd-pick command\n# This function should be sourced in your shell profile\n\n{}\n\n{}\n",
+        marker_start,
+        ccd_function,
+        marker_end
+    ));
+
+    // Write the updated .bashrc
+    fs::write(&bashrc_path, bashrc_content)?;
+
+    eprintln!("Successfully installed ccd function to ~/.bashrc");
+    eprintln!();
+    eprintln!("To use ccd immediately, run:");
+    eprintln!("  source ~/.bashrc");
+    eprintln!();
+    eprintln!("Or start a new terminal session.");
+    eprintln!();
+    eprintln!("Usage:");
+    eprintln!("  ccd              # Interactive mode");
+    eprintln!("  ccd <pattern>    # Search for directories matching pattern");
+    eprintln!("  ccd --help       # Show help");
+
+    Ok(())
+}
+
+fn extract_ccd_function_from_script(script: &str) -> String {
+    let lines: Vec<&str> = script.lines().collect();
+    let mut function_lines = Vec::new();
+    let mut found_function = false;
+
+    for line in lines {
+        if line.starts_with("ccd()") {
+            found_function = true;
+        }
+        if found_function {
+            function_lines.push(line);
+        }
+    }
+
+    function_lines.join("\n")
+}
+
+fn print_shell_function() {
+    println!("{}", CCD_SHELL_FUNCTION);
+}
+
 // Main application logic
 fn main() {
     if let Err(e) = run() {
@@ -474,6 +594,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             "-i" => run_interactive_mode()?,
             "-b" | "--bookmark" => bookmark_current_directory()?,
             "--help" | "-h" => print_help(),
+            "--install" => install_shell_function()?,
+            "--printfn" => print_shell_function(),
             pattern => search_and_change_directory(pattern)?,
         },
         3 if args[1] == "--increment" => {
@@ -783,23 +905,21 @@ fn print_help() {
     println!("USAGE:");
     println!("    ccd-pick -i                   Enter interactive mode");
     println!("    ccd-pick -b                   Bookmark current directory");
+    println!("    ccd-pick --install            Install ccd shell function to ~/.bashrc");
+    println!("    ccd-pick --printfn            Print shell function to standard output");
     println!("    ccd-pick <search_pattern>     Search for directories matching pattern");
     println!();
     println!("DESCRIPTION:");
     println!("    Uses the locate database to quickly look up directories to cd into.");
     println!("    Remembers most frequently used directories for faster access.");
-    println!("    Usually invoked via the ccd wrapper function.");
+    println!("    Invoked via the ccd wrapper function: install it, then run ccd.");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Show this help message");
     println!("    -i               Interactive mode (used internally by shell wrapper)");
     println!("    -b, --bookmark   Add current directory to bookmarks with frequency 1");
-    println!();
-    println!("EXAMPLES:");
-    println!("    ccd-pick -i      # Enter interactive mode");
-    println!("    ccd-pick -b      # Bookmark current directory");
-    println!("    ccd-pick proj    # Find directories containing 'proj'");
-    println!("    ccd-pick Docs    # Find directories containing 'Docs'");
+    println!("    --install        Install shell function to ~/.bashrc (creates backup)");
+    println!("    --printfn        Print the shell function to standard output");
     println!();
     println!("INTERACTIVE MODE:");
     println!("    Type to search, use ↑/↓ to navigate, PgUp/PgDn for fast navigation");
