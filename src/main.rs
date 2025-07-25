@@ -47,10 +47,10 @@ enum CddError {
 impl fmt::Display for CddError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CddError::LocateCommand(msg) => write!(f, "Locate command error: {}", msg),
+            CddError::LocateCommand(msg) => write!(f, "Locate command error: {msg}"),
             CddError::NoDirectoriesFound => write!(f, "No directories found"),
-            CddError::DirectoryNotFound(path) => write!(f, "Directory not found: {}", path),
-            CddError::IoError(err) => write!(f, "IO error: {}", err),
+            CddError::DirectoryNotFound(path) => write!(f, "Directory not found: {path}"),
+            CddError::IoError(err) => write!(f, "IO error: {err}"),
         }
     }
 }
@@ -76,6 +76,21 @@ impl DirectoryEntry {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SearchResult {
+    directories: Vec<DirectoryEntry>,
+    files_filtered: usize,
+}
+
+impl SearchResult {
+    fn new(directories: Vec<DirectoryEntry>, files_filtered: usize) -> Self {
+        Self {
+            directories,
+            files_filtered,
+        }
+    }
+}
+
 struct App {
     input: String,
     directories: Vec<DirectoryEntry>,
@@ -84,6 +99,7 @@ struct App {
     user_selected: bool,
     frequency_map: HashMap<String, u32>,
     view_mode: ViewMode,
+    files_filtered: usize,
 }
 
 impl App {
@@ -97,24 +113,28 @@ impl App {
             user_selected: false,
             frequency_map,
             view_mode: ViewMode::Search,
+            files_filtered: 0,
         })
     }
 
     fn search_directories(&mut self) -> Result<(), CddError> {
         if self.input.is_empty() {
             self.directories.clear();
+            self.files_filtered = 0;
             self.list_state.select(None);
             return Ok(());
         }
 
         // Search and handle the case where no results are found
         match DirectorySearcher::search(&self.input, &self.frequency_map) {
-            Ok(directories) => {
-                self.directories = directories;
+            Ok(search_result) => {
+                self.directories = search_result.directories;
+                self.files_filtered = search_result.files_filtered;
             }
             Err(CddError::NoDirectoriesFound) => {
                 // Clear results when no directories are found
                 self.directories.clear();
+                self.files_filtered = 0;
             }
             Err(e) => return Err(e),
         }
@@ -360,7 +380,7 @@ impl FrequencyManager {
         let mut file = fs::File::create(&freq_file)?;
 
         for (path, count) in frequency_map {
-            writeln!(file, "{}\t{}", count, path)?;
+            writeln!(file, "{count}\t{path}")?;
         }
 
         Ok(())
@@ -381,9 +401,10 @@ impl DirectorySearcher {
     fn search(
         pattern: &str,
         frequency_map: &HashMap<String, u32>,
-    ) -> Result<Vec<DirectoryEntry>, CddError> {
+    ) -> Result<SearchResult, CddError> {
         // Use a HashSet to deduplicate paths from both sources
         let mut unique_paths = std::collections::HashSet::new();
+        let mut files_filtered = 0;
 
         // First, search using locate
         let output = Command::new("locate")
@@ -391,21 +412,23 @@ impl DirectorySearcher {
             .arg(LOCATE_LIMIT)
             .arg(pattern)
             .output()
-            .map_err(|e| CddError::LocateCommand(format!("Failed to execute locate: {}", e)))?;
+            .map_err(|e| CddError::LocateCommand(format!("Failed to execute locate: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let locate_paths: Vec<&str> = stdout.lines().collect();
 
-        // Add locate results to our set
+        // Count files and add directories to our set
         for path in locate_paths {
             if Path::new(path).is_dir() {
                 unique_paths.insert(path.to_string());
+            } else {
+                files_filtered += 1;
             }
         }
 
         // Second, search through frequency map for paths that match the pattern
         let pattern_lower = pattern.to_lowercase();
-        for (path, _count) in frequency_map {
+        for path in frequency_map.keys() {
             if path.to_lowercase().contains(&pattern_lower) && Path::new(path).is_dir() {
                 unique_paths.insert(path.clone());
             }
@@ -426,7 +449,7 @@ impl DirectorySearcher {
             .collect();
 
         Self::sort_directories(&mut directories);
-        Ok(directories)
+        Ok(SearchResult::new(directories, files_filtered))
     }
 
     fn sort_directories(directories: &mut [DirectoryEntry]) {
@@ -437,7 +460,7 @@ impl DirectorySearcher {
 // Main application logic
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
+        eprintln!("Error: {e}");
         exit(1);
     }
 }
@@ -467,7 +490,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn bookmark_current_directory() -> Result<(), Box<dyn Error>> {
     let current_dir = env::current_dir()
-        .map_err(|e| CddError::IoError(e))?
+        .map_err(CddError::IoError)?
         .to_string_lossy()
         .to_string();
 
@@ -477,28 +500,28 @@ fn bookmark_current_directory() -> Result<(), Box<dyn Error>> {
     if !frequency_map.contains_key(&current_dir) {
         frequency_map.insert(current_dir.clone(), 1);
         FrequencyManager::save(&frequency_map)?;
-        eprintln!("Bookmarked: {}", current_dir);
+        eprintln!("Bookmarked: {current_dir}");
     } else {
-        eprintln!("Directory already bookmarked: {}", current_dir);
+        eprintln!("Directory already bookmarked: {current_dir}");
     }
 
     Ok(())
 }
 
 fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error>> {
-    eprintln!("Searching for directories matching: {}", search_pattern);
+    eprintln!("Searching for directories matching: {search_pattern}");
 
     let frequency_map = FrequencyManager::load()?;
-    let directories =
+    let search_result =
         DirectorySearcher::search(search_pattern, &frequency_map).map_err(|e| match e {
             CddError::NoDirectoriesFound => {
-                eprintln!("No directories found matching '{}'", search_pattern);
+                eprintln!("No directories found matching '{search_pattern}'");
                 exit(1);
             }
             other => other,
         })?;
 
-    let target_dir = &directories[0].path;
+    let target_dir = &search_result.directories[0].path;
 
     // Verify the directory exists and is accessible
     if !Path::new(target_dir).exists() {
@@ -510,18 +533,26 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
     }
 
     // Output the directory path for shell integration
-    println!("{}", target_dir);
+    println!("{target_dir}");
 
     // Provide feedback to stderr
-    let freq_info = if directories[0].count > 0 {
-        format!(" (used {} times)", directories[0].count)
+    let freq_info = if search_result.directories[0].count > 0 {
+        format!(" (used {} times)", search_result.directories[0].count)
     } else {
         String::new()
     };
+
+    let files_info = if search_result.files_filtered > 0 {
+        format!("; {} matching files not shown", search_result.files_filtered)
+    } else {
+        String::new()
+    };
+
     eprintln!(
-        "Found {} directories in first {} results, selected: {}{}",
-        directories.len(),
+        "Found {} directories in first {} results{}, selected: {}{}",
+        search_result.directories.len(),
         LOCATE_LIMIT,
+        files_info,
         target_dir,
         freq_info
     );
@@ -552,7 +583,7 @@ fn run_interactive_mode() -> Result<(), Box<dyn Error>> {
 
     match res {
         Err(err) => {
-            eprintln!("{:?}", err);
+            eprintln!("{err:?}");
             exit(1);
         }
         Ok(()) if app.user_selected => {
@@ -562,9 +593,9 @@ fn run_interactive_mode() -> Result<(), Box<dyn Error>> {
 
                 // Output the selected directory to file descriptor 3 if available, otherwise stdout
                 if let Ok(mut fd3) = fs::OpenOptions::new().write(true).open("/proc/self/fd/3") {
-                    writeln!(fd3, "{}", selected_dir)?;
+                    writeln!(fd3, "{selected_dir}")?;
                 } else {
-                    println!("{}", selected_dir);
+                    println!("{selected_dir}");
                 }
             }
         }
@@ -689,7 +720,17 @@ fn render_results_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let title = match app.view_mode {
-        ViewMode::Search => format!("Search Results ({} found)", app.directories.len()),
+        ViewMode::Search => {
+            if app.files_filtered > 0 {
+                format!(
+                    "Search Results ({} found; {} matching files not shown)",
+                    app.directories.len(),
+                    app.files_filtered
+                )
+            } else {
+                format!("Search Results ({} found)", app.directories.len())
+            }
+        }
         ViewMode::Frequent => {
             if app.directories.is_empty() {
                 "Frequent Directories (none)".to_string()
