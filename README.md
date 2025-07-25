@@ -2,6 +2,8 @@
 
 A fast, intelligent directory navigation tool that uses the `locate` database to quickly find and change to directories. Features frequency tracking and an interactive TUI for easy directory selection.
 
+Note: `ccd-pick` needs the shell wrapper in [`ccd.sh`](ccd.sh) in order to change directories. See below for details.
+
 ## Features
 
 - **Fast search**: Uses the `locate` database for instant directory lookup
@@ -18,7 +20,14 @@ A fast, intelligent directory navigation tool that uses the `locate` database to
 ### Quick Install
 
 1. Install the Rust binary to your PATH:
-   ```bash
+
+   ```
+   cargo install ccd-pick
+   ```
+
+   Or, to build and install from the repository:
+
+  ```bash
    cargo install --path . --locked
    ```
 
@@ -66,7 +75,7 @@ ccd
 - `Home/End`: Jump to first/last result
 - `Enter`: Select directory and change to it
 - `Shift+Delete`: Reset frequency count for selected directory
-- `q/Esc`: Quit without changing directory
+- `Esc`: Quit without changing directory
 
 **Search Mode:**
 - Type to search directories using the locate database
