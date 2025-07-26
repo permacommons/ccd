@@ -5,7 +5,7 @@ use std::fmt;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, exit};
+use std::process::{exit, Command};
 
 use chrono::Local;
 
@@ -17,15 +17,15 @@ use crossterm::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Frame, Terminal,
 };
 
 // Constants
@@ -665,7 +665,10 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
     };
 
     let files_info = if search_result.files_filtered > 0 {
-        format!("; {} matching files not shown", search_result.files_filtered)
+        format!(
+            "; {} matching files not shown",
+            search_result.files_filtered
+        )
     } else {
         String::new()
     };
@@ -893,9 +896,11 @@ fn create_list_item(dir: &DirectoryEntry) -> ListItem {
 }
 
 fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
-    let help = Paragraph::new("↑/↓: Navigate | Home/End: First/Last | Shift+Del: Reset Count | Enter: Select | Esc: Quit")
-        .style(Style::default().fg(Color::Gray))
-        .block(Block::default().borders(Borders::ALL).title("Help"));
+    let help = Paragraph::new(
+        "↑/↓: Navigate | Home/End: First/Last | Shift+Del: Reset Count | Enter: Select | Esc: Quit",
+    )
+    .style(Style::default().fg(Color::Gray))
+    .block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(help, area);
 }
 
