@@ -2,7 +2,7 @@
 
 A fast, intelligent directory navigation tool that uses the `locate` database to quickly find and change to directories. Features frequency tracking and an interactive TUI for easy directory selection.
 
-`ccd-pick` uses a shell wrapper function to change the directory to the one you select. `ccd-pick --install` installs it in `~/.bashrc` for you.
+`ccd` is a shell function that wraps a Rust tool called `ccd-pick`. First install `ccd-pick`, then use it to install the wrapper.
 
 ![Animation showing core functionality](vhs.gif)
 
