@@ -468,7 +468,7 @@ fn check_shell_compatibility() -> Result<(), Box<dyn Error>> {
 
     if !shell.ends_with("/bash") && !shell.ends_with("bash") {
         eprintln!("Error: Only bash is currently supported.");
-        eprintln!("Your current shell is: {}", shell);
+        eprintln!("Your current shell is: {shell}");
         eprintln!("Please switch to bash or manually install the shell function.");
         exit(1);
     }
@@ -490,7 +490,7 @@ fn install_shell_function() -> Result<(), Box<dyn Error>> {
         let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
         let backup_path = format!("{}.backup.{}", bashrc_path.display(), timestamp);
         fs::copy(&bashrc_path, &backup_path)?;
-        eprintln!("Created backup: {}", backup_path);
+        eprintln!("Created backup: {backup_path}");
     }
 
     // Read existing .bashrc content
@@ -532,10 +532,7 @@ fn install_shell_function() -> Result<(), Box<dyn Error>> {
     }
 
     bashrc_content.push_str(&format!(
-        "\n{}\n# Shell wrapper for the ccd-pick command\n# This function should be sourced in your shell profile\n\n{}\n\n{}\n",
-        marker_start,
-        ccd_function,
-        marker_end
+        "\n{marker_start}\n# Shell wrapper for the ccd-pick command\n# This function should be sourced in your shell profile\n\n{ccd_function}\n\n{marker_end}\n"
     ));
 
     // Write the updated .bashrc
@@ -574,7 +571,7 @@ fn extract_ccd_function_from_script(script: &str) -> String {
 }
 
 fn print_shell_function() {
-    println!("{}", CCD_SHELL_FUNCTION);
+    println!("{CCD_SHELL_FUNCTION}");
 }
 
 // Main application logic
