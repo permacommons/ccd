@@ -2,7 +2,7 @@
 
 A fast, intelligent directory navigation tool that uses the `locate` database to quickly find and change to directories. Features frequency tracking and an interactive TUI for easy directory selection.
 
-Note: `ccd-pick` needs the shell wrapper in [`ccd.sh`](ccd.sh) in order to change directories. See below for details.
+`ccd-pick` uses a shell wrapper function to change the directory to the one you select. `ccd-pick --install` installs it in `~/.bashrc` for you.
 
 ![Animation showing core functionality](vhs.gif)
 
