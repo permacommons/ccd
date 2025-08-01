@@ -399,6 +399,22 @@ impl FrequencyManager {
     }
 }
 
+// Utility function to check if locate command is available
+fn check_locate_available() -> bool {
+    Command::new("locate").arg("--version").output().is_ok()
+}
+
+// Print locate unavailable message with specified severity level
+fn print_locate_unavailable_message(severity: &str) {
+    eprintln!(
+        "{}: The 'locate' command is not available on this system.",
+        severity
+    );
+    eprintln!("Search functionality will not work without it.");
+    eprintln!("Please install the 'plocate' package and run 'sudo updatedb'.");
+    eprintln!("Example: sudo apt install plocate && sudo updatedb");
+}
+
 // Directory search module
 struct DirectorySearcher;
 
@@ -417,7 +433,14 @@ impl DirectorySearcher {
             .arg(LOCATE_LIMIT)
             .arg(pattern)
             .output()
-            .map_err(|e| CddError::LocateCommand(format!("Failed to execute locate: {e}")))?;
+            .map_err(|e| {
+                // Check if this is a "command not found" error
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    print_locate_unavailable_message("ERROR");
+                    std::process::exit(1);
+                }
+                CddError::LocateCommand(format!("Failed to execute locate: {e}"))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let locate_paths: Vec<&str> = stdout.lines().collect();
@@ -662,10 +685,7 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
     };
 
     let files_info = if search_result.files_filtered > 0 {
-        format!(
-            "; {} matching files not shown",
-            search_result.files_filtered
-        )
+        format!("; {} matching files excluded", search_result.files_filtered)
     } else {
         String::new()
     };
@@ -683,6 +703,12 @@ fn search_and_change_directory(search_pattern: &str) -> Result<(), Box<dyn Error
 }
 
 fn run_interactive_mode() -> Result<(), Box<dyn Error>> {
+    // Check if locate is available before setting up the TUI
+    if !check_locate_available() {
+        print_locate_unavailable_message("ERROR");
+        exit(1);
+    }
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -904,6 +930,13 @@ fn render_help_text(f: &mut Frame, area: ratatui::layout::Rect) {
 fn print_help() {
     println!("ccd-pick - Change Change Directory Picker");
     println!();
+
+    // Check if locate is available and show warning if not
+    if !check_locate_available() {
+        print_locate_unavailable_message("WARNING");
+        println!();
+    }
+
     println!("USAGE:");
     println!("    ccd-pick -i                   Enter interactive mode");
     println!("    ccd-pick -b                   Bookmark current directory");
