@@ -406,9 +406,7 @@ fn check_locate_available() -> bool {
 
 // Print locate unavailable message with specified severity level
 fn print_locate_unavailable_message(severity: &str) {
-    eprintln!(
-        "{severity}: The 'locate' command is not available on this system."
-    );
+    eprintln!("{severity}: The 'locate' command is not available on this system.");
     eprintln!("Search functionality will not work without it.");
     eprintln!("Please install the 'plocate' package and run 'sudo updatedb'.");
     eprintln!("Example: sudo apt install plocate && sudo updatedb");
@@ -545,16 +543,13 @@ fn install_shell_function() -> Result<(), Box<dyn Error>> {
         bashrc_content = new_lines.join("\n");
     }
 
-    // Extract just the ccd function from the shell script (skip shebang and comments)
-    let ccd_function = extract_ccd_function_from_script(CCD_SHELL_FUNCTION);
-
-    // Add the new ccd function
+    // Add the new ccd function using eval
     if !bashrc_content.is_empty() && !bashrc_content.ends_with('\n') {
         bashrc_content.push('\n');
     }
 
     bashrc_content.push_str(&format!(
-        "\n{marker_start}\n# Shell wrapper for the ccd-pick command\n# This function should be sourced in your shell profile\n\n{ccd_function}\n\n{marker_end}\n"
+        "\n{marker_start}\n# Shell wrapper for the ccd-pick command\n# This function is loaded dynamically from ccd-pick --printfn\n# This ensures the function stays up-to-date with ccd-pick updates\neval \"$(ccd-pick --printfn)\"\n\n{marker_end}\n"
     ));
 
     // Write the updated .bashrc
@@ -575,25 +570,11 @@ fn install_shell_function() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn extract_ccd_function_from_script(script: &str) -> String {
-    let lines: Vec<&str> = script.lines().collect();
-    let mut function_lines = Vec::new();
-    let mut found_function = false;
-
-    for line in lines {
-        if line.starts_with("ccd()") {
-            found_function = true;
-        }
-        if found_function {
-            function_lines.push(line);
-        }
-    }
-
-    function_lines.join("\n")
-}
-
 fn print_shell_function() {
-    println!("{CCD_SHELL_FUNCTION}");
+    // Skip the first line (shebang) and print the rest
+    if let Some(pos) = CCD_SHELL_FUNCTION.find('\n') {
+        println!("{}", &CCD_SHELL_FUNCTION[pos + 1..]);
+    }
 }
 
 // Main application logic
