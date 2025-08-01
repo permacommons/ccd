@@ -407,8 +407,7 @@ fn check_locate_available() -> bool {
 // Print locate unavailable message with specified severity level
 fn print_locate_unavailable_message(severity: &str) {
     eprintln!(
-        "{}: The 'locate' command is not available on this system.",
-        severity
+        "{severity}: The 'locate' command is not available on this system."
     );
     eprintln!("Search functionality will not work without it.");
     eprintln!("Please install the 'plocate' package and run 'sudo updatedb'.");
